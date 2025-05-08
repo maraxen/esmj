@@ -9,7 +9,7 @@ dependencies = [
     "esm>=3.2.0",
     "jax>=0.6.0",
     "jaxtyping>=0.3.2",
-    "numpy>=2.2.5",
+    "numpy>=1.26.3",
 ]
 
 [tool.uv]
