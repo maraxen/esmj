@@ -17,6 +17,7 @@ import esm.layers.transformer_stack
 import esm.models
 import esm.models.esmc
 
+
 @singledispatch
 def from_torch(x):
     raise NotImplementedError(f"from_torch not implemented for {type(x)}: {x}")
@@ -195,11 +196,11 @@ def _handle(_):
 
     return swiglu
 
+
 @register_from_torch(esm.layers.rotary.RotaryEmbedding)
 class RotaryEmbedding(AbstractFromTorch):
     dim: int
     base: int = 10000
-    
 
     def __call__(self, q: Float[Array, "B N H D"], k: Float[Array, "B N H D"]):
         N = q.shape[1]
@@ -207,35 +208,43 @@ class RotaryEmbedding(AbstractFromTorch):
         freqs = jnp.outer(t, self.inverse_freq)
         cos = jnp.cos(freqs)[:N]
         sin = jnp.sin(freqs)[:N]
-        
+
         return (
             self.apply_rotary_emb(q, cos, sin),
             self.apply_rotary_emb(k, cos, sin),
         )
-    
 
     @property
     def inverse_freq(self):
-        return 1.0 / (self.base ** (jnp.arange(0, self.dim, 2, dtype=jnp.float32) / self.dim))
-    
+        return 1.0 / (
+            self.base ** (jnp.arange(0, self.dim, 2, dtype=jnp.float32) / self.dim)
+        )
+
     @staticmethod
     def rotate_half(x: Float[Array, "B N H D"]):
         x1, x2 = np.split(x, 2, axis=-1)
         return jnp.concatenate((-x2, x1), axis=-1)
-        
 
     @staticmethod
-    def apply_rotary_emb(x: Float[Array, "B N H D"], cos: Float[Array, "N P"], sin: Float[Array, "N P"]):
+    def apply_rotary_emb(
+        x: Float[Array, "B N H D"], cos: Float[Array, "N P"], sin: Float[Array, "N P"]
+    ):
         ro_dim = cos.shape[-1] * 2
         assert ro_dim <= x.shape[-1]
-        seqlen = x.shape[1]#x.size(1)
+        seqlen = x.shape[1]  # x.size(1)
         cos = cos[:seqlen]
         sin = sin[:seqlen]
         cos = einops.repeat(cos, "s d -> s 1 (2 d)")
         sin = einops.repeat(sin, "s d -> s 1 (2 d)")
-        return jnp.concatenate([
-            x[..., :ro_dim] * cos + RotaryEmbedding.rotate_half(x[..., :ro_dim]) * sin,
-            x[..., ro_dim:]], axis=-1)
+        return jnp.concatenate(
+            [
+                x[..., :ro_dim] * cos
+                + RotaryEmbedding.rotate_half(x[..., :ro_dim]) * sin,
+                x[..., ro_dim:],
+            ],
+            axis=-1,
+        )
+
 
 @register_from_torch(esm.layers.attention.MultiHeadAttention)
 class MultiHeadAttention(AbstractFromTorch):
@@ -244,16 +253,16 @@ class MultiHeadAttention(AbstractFromTorch):
     d_head: int
     layernorm_qkv: Sequential
     out_proj: Linear
-    rotary: RotaryEmbedding 
+    rotary: RotaryEmbedding
     q_ln: LayerNorm
     k_ln: LayerNorm
 
     def _apply_rotary(self, q, k):
-        q = einops.rearrange(q, "... (h d) -> ... h d", h=self.n_heads, d = self.d_head)
-        k = einops.rearrange(k, "... (h d) -> ... h d", h=self.n_heads, d = self.d_head)
+        q = einops.rearrange(q, "... (h d) -> ... h d", h=self.n_heads, d=self.d_head)
+        k = einops.rearrange(k, "... (h d) -> ... h d", h=self.n_heads, d=self.d_head)
         q, k = self.rotary(q, k)
-        q = einops.rearrange(q, "... h d -> ... (h d)", h=self.n_heads, d = self.d_head)
-        k = einops.rearrange(k, "... h d -> ... (h d)", h=self.n_heads, d = self.d_head)
+        q = einops.rearrange(q, "... h d -> ... (h d)", h=self.n_heads, d=self.d_head)
+        k = einops.rearrange(k, "... h d -> ... (h d)", h=self.n_heads, d=self.d_head)
         return q, k
 
     def __call__(self, x):
@@ -267,20 +276,20 @@ class MultiHeadAttention(AbstractFromTorch):
         query_BLD, key_BLD = self._apply_rotary(query_BLD, key_BLD)
 
         query_BHLD, key_BHLD, value_BHLD = map(
-            lambda x: einops.rearrange(x, pattern="b s (h d) -> b h s d", h=self.n_heads), (query_BLD, key_BLD, value_BLD)
+            lambda x: einops.rearrange(
+                x, pattern="b s (h d) -> b h s d", h=self.n_heads
+            ),
+            (query_BLD, key_BLD, value_BLD),
         )
-        
-        scale_factor = 1.0 / jnp.sqrt(query_BHLD.shape[-1])
-        z = einops.einsum(
-            query_BHLD, key_BHLD, "b h s d, b h f d -> b h s f"
-        ) * scale_factor
-        w = jax.nn.softmax(z, axis=-1)
-        context_BHLD = einops.einsum(
-            w, value_BHLD, "b h s f, b h f d -> b h s d"
-        )
-        context_BHLD = einops.rearrange(context_BHLD, "b h s d -> b s (h d)")
-        return self.out_proj(context_BHLD)
 
+        context_BHLD = jax.nn.dot_product_attention(
+            einops.rearrange(query_BHLD, "B H S D -> B S H D"),
+            einops.rearrange(key_BHLD, "B H S D -> B S H D"),
+            einops.rearrange(value_BHLD, "B H S D -> B S H D"),
+        )
+
+        context_BHLD = einops.rearrange(context_BHLD, "b s h d -> b s (h d)")
+        return self.out_proj(context_BHLD)
 
 
 @register_from_torch(esm.layers.blocks.UnifiedTransformerBlock)
@@ -293,7 +302,7 @@ class UnifiedTransformerBlock(AbstractFromTorch):
         x = x + self.attn(x) / self.scaling_factor
         x = x + self.ffn(x) / self.scaling_factor
         return x
-    
+
 
 @register_from_torch(esm.layers.transformer_stack.TransformerStack)
 class TransformerStack(AbstractFromTorch):
@@ -317,7 +326,10 @@ class TransformerStack(AbstractFromTorch):
     @staticmethod
     def from_torch(m: esm.layers.transformer_stack.TransformerStack):
         blocks = [from_torch(b) for b in m.blocks]
-        block_params = jax.tree.map(lambda *v: jnp.stack(v), *[eqx.filter(b, eqx.is_inexact_array) for b in blocks])
+        block_params = jax.tree.map(
+            lambda *v: jnp.stack(v),
+            *[eqx.filter(b, eqx.is_inexact_array) for b in blocks],
+        )
         block_static = eqx.partition(blocks[0], eqx.is_inexact_array)[1]
         return TransformerStack(
             block_params=block_params,
@@ -330,6 +342,7 @@ class ESMCOutput(eqx.Module):
     logits: Float[Array, "B N V"]
     embedding: Float[Array, "B N D"]
     hiddens: Float[Array, "B N L D"]
+
 
 @register_from_torch(esm.models.esmc.ESMC)
 class ESMC(eqx.Module):
@@ -348,9 +361,14 @@ class ESMC(eqx.Module):
             embedding=x,
             hiddens=hiddens,
         )
-    
+
     def tokenize(self, sequence: str):
-        return np.array([self.vocab["<cls>"]] + [self.vocab[c] for c in sequence] + [self.vocab["<eos>"]], dtype=np.int32)
+        return np.array(
+            [self.vocab["<cls>"]]
+            + [self.vocab[c] for c in sequence]
+            + [self.vocab["<eos>"]],
+            dtype=np.int32,
+        )
 
     @staticmethod
     def from_torch(m: esm.models.esmc.ESMC):
@@ -358,8 +376,6 @@ class ESMC(eqx.Module):
             embed=from_torch(m.embed),
             transformer=from_torch(m.transformer),
             sequence_head=from_torch(m.sequence_head),
-            vocab=m.tokenizer.vocab | {esm.utils.constants.esm3.MASK_STR_SHORT: m.tokenizer.vocab["<mask>"]},
+            vocab=m.tokenizer.vocab
+            | {esm.utils.constants.esm3.MASK_STR_SHORT: m.tokenizer.vocab["<mask>"]},
         )
-    
-
-        
