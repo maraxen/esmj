@@ -14,7 +14,7 @@ client = ESMC.from_pretrained("esmc_300m").to("cpu")
 
 
 # demo
-prot_seq = "AKSHAY"
+prot_seq = "ESCALANTE"
 
 # torch prediction
 protein = ESMProtein(sequence=prot_seq)
