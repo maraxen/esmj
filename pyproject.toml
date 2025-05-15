@@ -3,11 +3,11 @@ name = "esmj"
 version = "0.1.0"
 description = "JAX translation of ESMC"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
     "equinox>=0.12.1",
     "esm>=3.2.0",
-    "jax>=0.6.0",
+    "jax==0.5.3",
     "jaxtyping>=0.3.2",
     "numpy>=1.26.3",
 ]
