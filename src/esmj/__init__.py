@@ -23,8 +23,15 @@ def from_torch(x):
     raise NotImplementedError(f"from_torch not implemented for {type(x)}: {x}")
 
 
+
+def convert_tensor(x: torch.Tensor):
+    x = x.detach()
+    if x.dtype == torch.bfloat16:
+        x = x.to(torch.float32)
+    return np.array(x)
+
 # basic types
-from_torch.register(torch.Tensor, lambda x: np.array(x.detach()))
+from_torch.register(torch.Tensor, convert_tensor)
 from_torch.register(int, lambda x: x)
 from_torch.register(float, lambda x: x)
 from_torch.register(bool, lambda x: x)
