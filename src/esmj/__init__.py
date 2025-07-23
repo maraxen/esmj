@@ -1,21 +1,20 @@
 from dataclasses import fields
-from functools import singledispatch
+from functools import partial, singledispatch
 
 import einops
 import equinox as eqx
-import jax
-import torch
-from jax import numpy as jnp
-from jaxtyping import Array, Float, Int
-from functools import partial
-import numpy as np
 import esm
 import esm.layers
-import esm.layers.blocks
 import esm.layers.attention
+import esm.layers.blocks
 import esm.layers.transformer_stack
 import esm.models
 import esm.models.esmc
+import jax
+import numpy as np
+import torch
+from jax import numpy as jnp
+from jaxtyping import Array, Float, Int
 
 
 @singledispatch
@@ -23,12 +22,12 @@ def from_torch(x):
     raise NotImplementedError(f"from_torch not implemented for {type(x)}: {x}")
 
 
-
 def convert_tensor(x: torch.Tensor):
     x = x.detach()
     if x.dtype == torch.bfloat16:
         x = x.to(torch.float32)
     return np.array(x)
+
 
 # basic types
 from_torch.register(torch.Tensor, convert_tensor)
@@ -59,8 +58,7 @@ class AbstractFromTorch(eqx.Module):
 
         field_to_type = {field.name: field.type for field in fields(cls)}
         kwargs = {
-            child: from_torch(child_module)
-            for child, child_module in model.named_children()
+            child: from_torch(child_module) for child, child_module in model.named_children()
         } | {
             parameter_name: from_torch(parameter)
             for parameter_name, parameter in model.named_parameters(recurse=False)
@@ -153,9 +151,7 @@ class LayerNorm(eqx.Module):
 
     @staticmethod
     def from_torch(l: torch.nn.LayerNorm):
-        return LayerNorm(
-            weight=from_torch(l.weight), bias=from_torch(l.bias), eps=l.eps
-        )
+        return LayerNorm(weight=from_torch(l.weight), bias=from_torch(l.bias), eps=l.eps)
 
 
 @register_from_torch(torch.nn.Sequential)
@@ -223,9 +219,7 @@ class RotaryEmbedding(AbstractFromTorch):
 
     @property
     def inverse_freq(self):
-        return 1.0 / (
-            self.base ** (jnp.arange(0, self.dim, 2, dtype=jnp.float32) / self.dim)
-        )
+        return 1.0 / (self.base ** (jnp.arange(0, self.dim, 2, dtype=jnp.float32) / self.dim))
 
     @staticmethod
     def rotate_half(x: Float[Array, "B N H D"]):
@@ -245,8 +239,7 @@ class RotaryEmbedding(AbstractFromTorch):
         sin = einops.repeat(sin, "s d -> s 1 (2 d)")
         return jnp.concatenate(
             [
-                x[..., :ro_dim] * cos
-                + RotaryEmbedding.rotate_half(x[..., :ro_dim]) * sin,
+                x[..., :ro_dim] * cos + RotaryEmbedding.rotate_half(x[..., :ro_dim]) * sin,
                 x[..., ro_dim:],
             ],
             axis=-1,
@@ -283,9 +276,7 @@ class MultiHeadAttention(AbstractFromTorch):
         query_BLD, key_BLD = self._apply_rotary(query_BLD, key_BLD)
 
         query_BHLD, key_BHLD, value_BHLD = map(
-            lambda x: einops.rearrange(
-                x, pattern="b s (h d) -> b h s d", h=self.n_heads
-            ),
+            lambda x: einops.rearrange(x, pattern="b s (h d) -> b h s d", h=self.n_heads),
             (query_BLD, key_BLD, value_BLD),
         )
 
@@ -356,7 +347,6 @@ class ESMC(eqx.Module):
     embed: SparseEmbedding
     transformer: TransformerStack
     sequence_head: Sequential
-    vocab: dict[str, int]
 
     def __call__(self, tokens: Int[Array, "B N"]):
         assert tokens.ndim == 2, f"Expected 2D input, got {tokens.ndim}D"
@@ -369,20 +359,10 @@ class ESMC(eqx.Module):
             hiddens=hiddens,
         )
 
-    def tokenize(self, sequence: str):
-        return np.array(
-            [self.vocab["<cls>"]]
-            + [self.vocab[c] for c in sequence]
-            + [self.vocab["<eos>"]],
-            dtype=np.int32,
-        )
-
     @staticmethod
     def from_torch(m: esm.models.esmc.ESMC):
         return ESMC(
             embed=from_torch(m.embed),
             transformer=from_torch(m.transformer),
             sequence_head=from_torch(m.sequence_head),
-            vocab=m.tokenizer.vocab
-            | {esm.utils.constants.esm3.MASK_STR_SHORT: m.tokenizer.vocab["<mask>"]},
         )
