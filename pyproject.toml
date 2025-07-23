@@ -9,10 +9,10 @@ version = "0.1.0"
 description = "JAX translation of ESMC"
 readme = "README.md"
 requires-python = ">=3.10"
-dynamic = ["dependencies", "optional-dependencies"]
 
-[tool.setuptools.dynamic]
-dependencies = { file = ["requirements.txt"] }
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["esmj"]
 
 [tool.uv]
 package = true
