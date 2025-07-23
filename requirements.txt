@@ -3,3 +3,4 @@ jax>=0.5.3
 jaxtyping>=0.3.2
 numpy>=1.26.3
 git+https://github.com/maraxen/esm.git
+
