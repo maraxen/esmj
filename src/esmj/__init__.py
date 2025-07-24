@@ -26,7 +26,7 @@ def convert_tensor(x: torch.Tensor):
     x = x.detach()
     if x.dtype == torch.bfloat16:
         x = x.to(torch.float32)
-    return np.array(x)
+    return jnp.array(x)
 
 
 # basic types
